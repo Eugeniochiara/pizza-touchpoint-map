@@ -1,0 +1,456 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Pizza Touchpoint Map</title>
+
+  <!-- React 18 UMD -->
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+
+  <!-- Babel Standalone -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- Iconify Web Component (usa set lucide:...) -->
+  <script src="https://code.iconify.design/iconify-icon/1.0.8/iconify-icon.min.js"></script>
+
+  <style>
+    * { -webkit-user-select: none; user-select: none; }
+    input, textarea { -webkit-user-select: text; user-select: text; }
+    #err { position: fixed; inset: auto 1rem 1rem 1rem; z-index: 9999; }
+  </style>
+</head>
+<body class="min-h-screen">
+  <div id="root"></div>
+  <div id="err" class="hidden"></div>
+
+  <script>
+    window.addEventListener('error', function(e) {
+      const box = document.getElementById('err');
+      box.className = "block bg-red-50 text-red-800 border border-red-300 rounded-lg p-3 text-sm";
+      box.textContent = "Errore: " + (e.error && e.error.message ? e.error.message : e.message);
+    });
+  </script>
+
+  <script type="text/babel" data-presets="react">
+    const { useState } = React;
+
+    // Wrapper React per Iconify <iconify-icon>
+    const Icon = ({ name, color = "currentColor", size = 18, className = "" }) => (
+      <iconify-icon icon={name} style={{ color, fontSize: size }} class={className}></iconify-icon>
+    );
+
+    const PizzaTouchpointMap = () => {
+      const [draggedItem, setDraggedItem] = useState(null);
+      const [slices, setSlices] = useState({
+        awareness: { crust: [], cheese: [] },
+        consideration: { crust: [], cheese: [] },
+        conversion: { crust: [], cheese: [] },
+        retention: { crust: [], cheese: [] },
+        advocacy: { crust: [], cheese: [] }
+      });
+      const [showAddModal, setShowAddModal] = useState(false);
+      const [newTouchpoint, setNewTouchpoint] = useState({ name: '', type: 'digital' });
+      const [customTouchpoints, setCustomTouchpoints] = useState([]);
+
+      // Usiamo la collezione lucide di Iconify (prefisso "lucide:")
+      const tp = (id, name, iconName, type, color) => ({ id, name, iconName, type, color });
+      const touchpoints = [
+        tp('social-ads','Social Ads','lucide:share-2','digital','#3b82f6'),
+        tp('seo','SEO','lucide:search','digital','#3b82f6'),
+        tp('website','Website','lucide:monitor','digital','#3b82f6'),
+        tp('email','Email Marketing','lucide:mail','digital','#3b82f6'),
+        tp('instagram','Instagram','lucide:instagram','digital','#e11d48'),
+        tp('facebook','Facebook','lucide:facebook','digital','#1877f2'),
+        tp('linkedin','LinkedIn','lucide:linkedin','digital','#0a66c2'),
+        tp('youtube','YouTube','lucide:youtube','digital','#ff0000'),
+        tp('mobile-app','Mobile App','lucide:smartphone','digital','#3b82f6'),
+        tp('chat','Chat/Chatbot','lucide:message-square','digital','#3b82f6'),
+        tp('influencer','Influencer Digital','lucide:trending-up','digital','#3b82f6'),
+        tp('store','Punto Vendita','lucide:store','offline','#16a34a'),
+        tp('print','Stampa','lucide:newspaper','offline','#16a34a'),
+        tp('radio','Radio','lucide:radio','offline','#16a34a'),
+        tp('tv','TV','lucide:tv','offline','#16a34a'),
+        tp('events','Eventi','lucide:calendar','offline','#16a34a'),
+        tp('phone-call','Telefono','lucide:phone','offline','#16a34a'),
+        tp('direct-mail','Direct Mail','lucide:file-text','offline','#16a34a'),
+        tp('packaging','Packaging','lucide:package','offline','#16a34a'),
+        tp('outdoor','Outdoor/Billboard','lucide:map-pin','offline','#16a34a'),
+        tp('pr','PR/Ufficio Stampa','lucide:megaphone','offline','#16a34a'),
+        tp('word-of-mouth','Passaparola','lucide:users','offline','#16a34a'),
+        ...customTouchpoints
+      ];
+
+      const funnelSlices = [
+        { id: 'awareness', label: 'Consapevolezza', angle: -90, color: '#fef3c7', crustColor: '#fbbf24' },
+        { id: 'consideration', label: 'Considerazione', angle: -18, color: '#fde68a', crustColor: '#f97316' },
+        { id: 'conversion', label: 'Conversione', angle: 54, color: '#fcd34d', crustColor: '#22c55e' },
+        { id: 'retention', label: 'Fidelizzazione', angle: 126, color: '#fbbf24', crustColor: '#f472b6' },
+        { id: 'advocacy', label: 'Passaparola', angle: 198, color: '#f59e0b', crustColor: '#c084fc' }
+      ];
+
+      const handleDragStart = (e, touchpoint) => {
+        setDraggedItem(touchpoint);
+        e.dataTransfer.effectAllowed = 'copy';
+      };
+
+      const handleDragOver = (e) => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'copy';
+      };
+
+      const handleDrop = (e, sliceId, zone) => {
+        e.preventDefault();
+        if (draggedItem) {
+          setSlices(prev => ({
+            ...prev,
+            [sliceId]: {
+              ...prev[sliceId],
+              [zone]: [...prev[sliceId][zone], { ...draggedItem, uniqueId: Date.now() }]
+            }
+          }));
+          setDraggedItem(null);
+        }
+      };
+
+      const removeItem = (sliceId, zone, uniqueId) => {
+        setSlices(prev => ({
+          ...prev,
+          [sliceId]: {
+            ...prev[sliceId],
+            [zone]: prev[sliceId][zone].filter(item => item.uniqueId !== uniqueId)
+          }
+        }));
+      };
+
+      const addCustomTouchpoint = () => {
+        if (newTouchpoint.name.trim()) {
+          const customTp = {
+            id: `custom-${Date.now()}`,
+            name: newTouchpoint.name,
+            iconName: newTouchpoint.type === 'digital' ? 'lucide:monitor' : 'lucide:store',
+            type: newTouchpoint.type,
+            color: newTouchpoint.type === 'digital' ? '#3b82f6' : '#16a34a'
+          };
+          setCustomTouchpoints([...customTouchpoints, customTp]);
+          setNewTouchpoint({ name: '', type: 'digital' });
+          setShowAddModal(false);
+        }
+      };
+
+      const removeCustomTouchpoint = (id) => {
+        setCustomTouchpoints(customTouchpoints.filter(tp => tp.id !== id));
+      };
+
+      const renderPizzaSlice = (slice, index) => {
+        const startAngle = slice.angle;
+        const endAngle = startAngle + 72;
+        const centerX = 300;
+        const centerY = 300;
+        const outerRadius = 280;
+        const innerRadius = 60;
+        const midRadius = 170;
+
+        const polarToCartesian = (angle, radius) => {
+          const rad = (angle - 90) * Math.PI / 180;
+          return {
+            x: centerX + radius * Math.cos(rad),
+            y: centerY + radius * Math.sin(rad)
+          };
+        };
+
+        const outer1 = polarToCartesian(startAngle, outerRadius);
+        const outer2 = polarToCartesian(endAngle, outerRadius);
+        const mid1 = polarToCartesian(startAngle, midRadius);
+        const mid2 = polarToCartesian(endAngle, midRadius);
+        const inner1 = polarToCartesian(startAngle, innerRadius);
+        const inner2 = polarToCartesian(endAngle, innerRadius);
+
+        const crustPath = `
+          M ${centerX} ${centerY}
+          L ${outer1.x} ${outer1.y}
+          A ${outerRadius} ${outerRadius} 0 0 1 ${outer2.x} ${outer2.y}
+          L ${mid2.x} ${mid2.y}
+          A ${midRadius} ${midRadius} 0 0 0 ${mid1.x} ${mid1.y}
+          Z
+        `;
+
+        const cheesePath = `
+          M ${centerX} ${centerY}
+          L ${mid1.x} ${mid1.y}
+          A ${midRadius} ${midRadius} 0 0 1 ${mid2.x} ${mid2.y}
+          L ${inner2.x} ${inner2.y}
+          A ${innerRadius} ${innerRadius} 0 0 0 ${inner1.x} ${inner1.y}
+          Z
+        `;
+
+        const labelAngle = startAngle + 36;
+        const labelPos = polarToCartesian(labelAngle, 230);
+        const labelBg = polarToCartesian(labelAngle, 230);
+
+        return (
+          <g key={slice.id}>
+            <path
+              d={crustPath}
+              fill={slice.color}
+              stroke={slice.crustColor}
+              strokeWidth="3"
+              opacity="0.6"
+              onDragOver={handleDragOver}
+              onDrop={(e) => handleDrop(e, slice.id, 'crust')}
+              style={{ cursor: 'pointer' }}
+            />
+            <path
+              d={cheesePath}
+              fill="#fff8dc"
+              stroke="#ffd700"
+              strokeWidth="2"
+              onDragOver={handleDragOver}
+              onDrop={(e) => handleDrop(e, slice.id, 'cheese')}
+              style={{ cursor: 'pointer' }}
+            />
+            
+            <rect
+              x={labelBg.x - 50}
+              y={labelBg.y - 15}
+              width="100"
+              height="30"
+              fill="white"
+              stroke={slice.color}
+              strokeWidth="2"
+              rx="8"
+              opacity="0.95"
+            />
+            <text
+              x={labelPos.x}
+              y={labelPos.y}
+              textAnchor="middle"
+              dominantBaseline="middle"
+              fill="#333"
+              fontSize="13"
+              fontWeight="bold"
+            >
+              {slice.label}
+            </text>
+            
+            {slices[slice.id].crust.map((item, idx) => {
+              const itemAngle = startAngle + 15 + (idx * 12);
+              const itemPos = polarToCartesian(itemAngle, 225);
+              return (
+                <g key={item.uniqueId} onClick={() => removeItem(slice.id, 'crust', item.uniqueId)} style={{ cursor: 'pointer' }}>
+                  <circle cx={itemPos.x} cy={itemPos.y} r="12" fill="white" stroke={item.color} strokeWidth="2" />
+                  <foreignObject x={itemPos.x - 10} y={itemPos.y - 10} width="20" height="20">
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%', height: '100%' }}>
+                      <Icon name={item.iconName} color={item.color} size={14} />
+                    </div>
+                  </foreignObject>
+                </g>
+              );
+            })}
+            
+            {slices[slice.id].cheese.map((item, idx) => {
+              const itemAngle = startAngle + 15 + (idx * 12);
+              const itemPos = polarToCartesian(itemAngle, 115);
+              return (
+                <g key={item.uniqueId} onClick={() => removeItem(slice.id, 'cheese', item.uniqueId)} style={{ cursor: 'pointer' }}>
+                  <circle cx={itemPos.x} cy={itemPos.y} r="12" fill="white" stroke={item.color} strokeWidth="2" />
+                  <foreignObject x={itemPos.x - 10} y={itemPos.y - 10} width="20" height="20">
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%', height: '100%' }}>
+                      <Icon name={item.iconName} color={item.color} size={14} />
+                    </div>
+                  </foreignObject>
+                </g>
+              );
+            })}
+          </g>
+        );
+      };
+
+      return (
+        <div className="w-full min-h-screen bg-gradient-to-br from-orange-50 to-yellow-50 p-6 overflow-auto">
+          <div className="max-w-7xl mx-auto">
+            <h1 className="text-3xl font-bold text-center mb-2 text-orange-900">Pizza Touchpoint Map</h1>
+            <p className="text-center text-sm text-gray-600 mb-6">
+              Trascina i touchpoint negli spicchi: <span className="font-semibold text-amber-700">Bordo = Non Attivi</span> | <span className="font-semibold text-yellow-700">Mozzarella = Attivi</span>
+            </p>
+            
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              <div className="lg:col-span-2">
+                <div className="bg-white rounded-2xl shadow-xl p-8 flex items-center justify-center">
+                  <svg width="600" height="600" viewBox="0 0 600 600">
+                    <circle cx="300" cy="300" r="290" fill="#d2691e" opacity="0.3" />
+                    {funnelSlices.map((slice, index) => renderPizzaSlice(slice, index))}
+                    <circle cx="300" cy="300" r="55" fill="#dc2626" />
+                    <text x="300" y="305" textAnchor="middle" fill="white" fontSize="12" fontWeight="bold">PIZZA</text>
+                    <text x="300" y="320" textAnchor="middle" fill="white" fontSize="10">MAP</text>
+                  </svg>
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                <div className="bg-white rounded-xl shadow-lg p-4">
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="font-bold text-lg text-blue-700 flex items-center gap-2">
+                      <Icon name="lucide:monitor" size={20} /> Touchpoint Digitali
+                    </h3>
+                    <button
+                      onClick={() => setShowAddModal(true)}
+                      className="flex items-center gap-1 px-3 py-1 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors text-sm"
+                    >
+                      <Icon name="lucide:plus" size={16} /> Aggiungi
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    {touchpoints.filter(t => t.type === 'digital').map(tp => {
+                      const isCustom = tp.id.startsWith('custom-');
+                      return (
+                        <div key={tp.id} className="relative group">
+                          <div
+                            draggable
+                            onDragStart={(e) => handleDragStart(e, tp)}
+                            className="flex items-center gap-2 p-2 bg-blue-50 rounded-lg cursor-move hover:bg-blue-100 transition-colors"
+                          >
+                            <Icon name={tp.iconName} color={tp.color} size={18} />
+                            <span className="text-xs font-medium text-gray-700">{tp.name}</span>
+                          </div>
+                          {isCustom && (
+                            <button
+                              onClick={() => removeCustomTouchpoint(tp.id)}
+                              className="absolute -top-1 -right-1 bg-red-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                            >
+                              <Icon name="lucide:x" size={12} />
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className="bg-white rounded-xl shadow-lg p-4">
+                  <h3 className="font-bold text-lg mb-3 text-green-700 flex items-center gap-2">
+                    <Icon name="lucide:store" size={20} /> Touchpoint Offline
+                  </h3>
+                  <div className="grid grid-cols-2 gap-2">
+                    {touchpoints.filter(t => t.type === 'offline').map(tp => {
+                      const isCustom = tp.id.startsWith('custom-');
+                      return (
+                        <div key={tp.id} className="relative group">
+                          <div
+                            draggable
+                            onDragStart={(e) => handleDragStart(e, tp)}
+                            className="flex items-center gap-2 p-2 bg-green-50 rounded-lg cursor-move hover:bg-green-100 transition-colors"
+                          >
+                            <Icon name={tp.iconName} color={tp.color} size={18} />
+                            <span className="text-xs font-medium text-gray-700">{tp.name}</span>
+                          </div>
+                          {isCustom && (
+                            <button
+                              onClick={() => removeCustomTouchpoint(tp.id)}
+                              className="absolute -top-1 -right-1 bg-red-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                            >
+                              <Icon name="lucide:x" size={12} />
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className="bg-gradient-to-r from-amber-100 to-yellow-100 rounded-xl p-4 border-2 border-amber-300">
+                  <h4 className="font-bold text-sm mb-2 text-amber-900">Legenda</h4>
+                  <div className="space-y-1 text-xs text-gray-700">
+                    <div className="flex items-center gap-2">
+                      <div className="w-4 h-4 bg-gradient-to-r from-amber-200 to-orange-200 rounded border-2 border-amber-700"></div>
+                      <span>Bordo pizza = Touchpoint non attivi</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <div className="w-4 h-4 bg-yellow-100 rounded border-2 border-yellow-500"></div>
+                      <span>Mozzarella = Touchpoint attivi</span>
+                    </div>
+                    <p className="mt-2 italic">Clicca su un'icona nella pizza per rimuoverla</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {showAddModal && (
+              <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+                <div className="bg-white rounded-2xl p-6 max-w-md w-full mx-4 shadow-2xl">
+                  <h3 className="text-xl font-bold mb-4 text-gray-800">Aggiungi Touchpoint Personalizzato</h3>
+                  
+                  <div className="space-y-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Nome Touchpoint
+                      </label>
+                      <input
+                        type="text"
+                        value={newTouchpoint.name}
+                        onChange={(e) => setNewTouchpoint({...newTouchpoint, name: e.target.value})}
+                        placeholder="es. WhatsApp Business, Fiere..."
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white text-gray-800"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Tipo
+                      </label>
+                      <div className="flex gap-4">
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input
+                            type="radio"
+                            value="digital"
+                            checked={newTouchpoint.type === 'digital'}
+                            onChange={(e) => setNewTouchpoint({...newTouchpoint, type: e.target.value})}
+                            className="w-4 h-4 text-blue-600"
+                          />
+                          <span className="text-sm">Digitale</span>
+                        </label>
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input
+                            type="radio"
+                            value="offline"
+                            checked={newTouchpoint.type === 'offline'}
+                            onChange={(e) => setNewTouchpoint({...newTouchpoint, type: e.target.value})}
+                            className="w-4 h-4 text-green-600"
+                          />
+                          <span className="text-sm">Offline</span>
+                        </label>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex gap-3 mt-6">
+                    <button
+                      onClick={() => setShowAddModal(false)}
+                      className="flex-1 px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors font-medium"
+                    >
+                      Annulla
+                    </button>
+                    <button
+                      onClick={addCustomTouchpoint}
+                      className="flex-1 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors font-medium"
+                    >
+                      Aggiungi
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    };
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<PizzaTouchpointMap />);
+  </script>
+</body>
+</html>
