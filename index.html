@@ -103,13 +103,28 @@
         { id: 'advocacy', label: 'Passaparola', angle: 198, color: '#f59e0b', crustColor: '#c084fc' }
       ];
 
+      
+      // --- Utility: estrai clientX/Y da Mouse/Touch/Pointer events ---
+      const getClientXY = (evt) => {
+        // PointerEvent o MouseEvent
+        if (typeof evt.clientX === 'number' && typeof evt.clientY === 'number') {
+          return { x: evt.clientX, y: evt.clientY };
+        }
+        // TouchEvent: preferisci touches per start/move, changedTouches per end
+        const t = (evt.touches && evt.touches[0]) || (evt.changedTouches && evt.changedTouches[0]);
+        if (t && typeof t.clientX === 'number' && typeof t.clientY === 'number') {
+          return { x: t.clientX, y: t.clientY };
+        }
+        return { x: 0, y: 0 };
+      };
+
       // --- Utility coordinate SVG (clic/tap -> coordinate nel viewBox) ---
       const getSvgPoint = (evt) => {
         const svg = svgRef.current;
         const point = svg.createSVGPoint();
-        const touch = evt.touches && evt.touches[0];
-        point.x = touch ? touch.clientX : evt.clientX;
-        point.y = touch ? touch.clientY : evt.clientY;
+        const { x: cx, y: cy } = getClientXY(evt);
+        point.x = cx;
+        point.y = cy;
         const ctm = svg.getScreenCTM();
         if (!ctm) return { x: 0, y: 0 };
         const inv = ctm.inverse();
@@ -117,11 +132,13 @@
         return { x, y };
       };
 
+      // Costanti geometriche della pizza (ripristinate)
       const centerX = 300;
       const centerY = 300;
       const outerRadius = 280;
       const innerRadius = 60;
       const midRadius = 170;
+
 
       const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
 
@@ -302,7 +319,7 @@
               onDragOver={handleDragOver}
               onDrop={(e) => handleDrop(e, slice, 'crust')}
               onClick={(e) => handleZoneClick(e, slice, 'crust')}
-              onTouchEnd={(e) => { e.preventDefault(); handleZoneClick(e, slice, 'crust'); }}
+              onPointerDown={(e) => handleZoneClick(e, slice, 'crust')}
               style={{ cursor: 'pointer' }}
             />
             <path
@@ -313,7 +330,7 @@
               onDragOver={handleDragOver}
               onDrop={(e) => handleDrop(e, slice, 'cheese')}
               onClick={(e) => handleZoneClick(e, slice, 'cheese')}
-              onTouchEnd={(e) => { e.preventDefault(); handleZoneClick(e, slice, 'cheese'); }}
+              onPointerDown={(e) => handleZoneClick(e, slice, 'cheese')}
               style={{ cursor: 'pointer' }}
             />
 
