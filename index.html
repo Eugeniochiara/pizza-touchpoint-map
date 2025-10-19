@@ -2,7 +2,7 @@
 <html lang="it">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
   <title>Pizza Touchpoint Map</title>
 
   <!-- React 18 UMD -->
@@ -22,6 +22,13 @@
     * { -webkit-user-select: none; user-select: none; }
     input, textarea { -webkit-user-select: text; user-select: text; }
     #err { position: fixed; inset: auto 1rem 1rem 1rem; z-index: 9999; }
+    .selected-card { outline: 2px solid #1d4ed8; outline-offset: 2px; background: #dbeafe; }
+    .tap-hint { animation: pulse 2s infinite; }
+    @keyframes pulse {
+      0% { transform: scale(1); opacity: 1; }
+      50% { transform: scale(1.05); opacity: .75; }
+      100% { transform: scale(1); opacity: 1; }
+    }
   </style>
 </head>
 <body class="min-h-screen">
@@ -37,7 +44,7 @@
   </script>
 
   <script type="text/babel" data-presets="react">
-    const { useState } = React;
+    const { useState, useRef } = React;
 
     // Wrapper React per Iconify <iconify-icon>
     const Icon = ({ name, color = "currentColor", size = 18, className = "" }) => (
@@ -46,6 +53,7 @@
 
     const PizzaTouchpointMap = () => {
       const [draggedItem, setDraggedItem] = useState(null);
+      const [selectedItem, setSelectedItem] = useState(null); // per tap-to-place
       const [slices, setSlices] = useState({
         awareness: { crust: [], cheese: [] },
         consideration: { crust: [], cheese: [] },
@@ -56,6 +64,8 @@
       const [showAddModal, setShowAddModal] = useState(false);
       const [newTouchpoint, setNewTouchpoint] = useState({ name: '', type: 'digital' });
       const [customTouchpoints, setCustomTouchpoints] = useState([]);
+
+      const svgRef = useRef(null);
 
       // Usiamo la collezione lucide di Iconify (prefisso "lucide:")
       const tp = (id, name, iconName, type, color) => ({ id, name, iconName, type, color });
@@ -93,8 +103,38 @@
         { id: 'advocacy', label: 'Passaparola', angle: 198, color: '#f59e0b', crustColor: '#c084fc' }
       ];
 
+      // --- Utility coordinate SVG (clic/tap -> coordinate nel viewBox) ---
+      const getSvgPoint = (evt) => {
+        const svg = svgRef.current;
+        const point = svg.createSVGPoint();
+        const touch = evt.touches && evt.touches[0];
+        point.x = touch ? touch.clientX : evt.clientX;
+        point.y = touch ? touch.clientY : evt.clientY;
+        const ctm = svg.getScreenCTM();
+        if (!ctm) return { x: 0, y: 0 };
+        const inv = ctm.inverse();
+        const { x, y } = point.matrixTransform(inv);
+        return { x, y };
+      };
+
+      const centerX = 300;
+      const centerY = 300;
+      const outerRadius = 280;
+      const innerRadius = 60;
+      const midRadius = 170;
+
+      const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
+
+      // Converte un punto in angolo 0..360 relativo al centro
+      const cartesianToAngle = (x, y) => {
+        const angle = (Math.atan2(y - centerY, x - centerX) * 180) / Math.PI + 90;
+        return (angle + 360) % 360;
+      };
+
+      // Desktop drag start
       const handleDragStart = (e, touchpoint) => {
         setDraggedItem(touchpoint);
+        setSelectedItem(null);
         e.dataTransfer.effectAllowed = 'copy';
       };
 
@@ -103,18 +143,82 @@
         e.dataTransfer.dropEffect = 'copy';
       };
 
-      const handleDrop = (e, sliceId, zone) => {
+      // Drop con coordinate
+      const handleDrop = (e, sliceDef, zone) => {
         e.preventDefault();
-        if (draggedItem) {
-          setSlices(prev => ({
-            ...prev,
-            [sliceId]: {
-              ...prev[sliceId],
-              [zone]: [...prev[sliceId][zone], { ...draggedItem, uniqueId: Date.now() }]
-            }
-          }));
-          setDraggedItem(null);
+        const item = draggedItem;
+        if (!item) return;
+
+        const { x, y } = getSvgPoint(e);
+        placeItemAt({ item, sliceDef, zone, x, y });
+        setDraggedItem(null);
+      };
+
+      // Tap/click sulla zona
+      const handleZoneClick = (e, sliceDef, zone) => {
+        if (!selectedItem) return;
+        const { x, y } = getSvgPoint(e);
+        placeItemAt({ item: selectedItem, sliceDef, zone, x, y });
+        setSelectedItem(null);
+      };
+
+      // Logica di posizionamento: vincola il raggio nella zona e salva x,y
+      const placeItemAt = ({ item, sliceDef, zone, x, y }) => {
+        // calcola raggio e angolo
+        const dx = x - centerX;
+        const dy = y - centerY;
+        let r = Math.sqrt(dx*dx + dy*dy);
+        const angle = cartesianToAngle(x, y);
+
+        // limita raggio alla corona giusta
+        if (zone === 'crust') {
+          r = clamp(r, midRadius + 10, outerRadius - 10);
+        } else {
+          r = clamp(r, innerRadius + 10, midRadius - 10);
         }
+
+        // limita anche all'intervallo angolare dello spicchio
+        const startAngle = sliceDef.angle;
+        const endAngle = startAngle + 72;
+        const inSlice = (a) => {
+          // gestisce wrapping modulo 360
+          const norm = (v) => (v + 360) % 360;
+          const s = norm(startAngle);
+          const e = norm(endAngle);
+          const A = norm(a);
+          if (s < e) return A >= s && A <= e;
+          return A >= s || A <= e;
+        };
+        const finalAngle = inSlice(angle) ? angle : clampAngleToSlice(angle, startAngle, endAngle);
+
+        // converti a coordinate XY coerenti dopo clamp
+        const rad = (finalAngle - 90) * Math.PI / 180;
+        const px = centerX + r * Math.cos(rad);
+        const py = centerY + r * Math.sin(rad);
+
+        const payload = { ...item, uniqueId: Date.now() + Math.random(), x: px, y: py };
+
+        setSlices(prev => ({
+          ...prev,
+          [sliceDef.id]: {
+            ...prev[sliceDef.id],
+            [zone]: [...prev[sliceDef.id][zone], payload]
+          }
+        }));
+      };
+
+      const clampAngleToSlice = (a, start, end) => {
+        const norm = (v) => (v + 360) % 360;
+        const A = norm(a), S = norm(start), E = norm(end);
+        // Trova lato più vicino
+        const distToS = angularDistance(A, S);
+        const distToE = angularDistance(A, E);
+        return distToS < distToE ? S : E;
+      };
+
+      const angularDistance = (a, b) => {
+        const d = Math.abs(a - b) % 360;
+        return d > 180 ? 360 - d : d;
       };
 
       const removeItem = (sliceId, zone, uniqueId) => {
@@ -149,11 +253,6 @@
       const renderPizzaSlice = (slice, index) => {
         const startAngle = slice.angle;
         const endAngle = startAngle + 72;
-        const centerX = 300;
-        const centerY = 300;
-        const outerRadius = 280;
-        const innerRadius = 60;
-        const midRadius = 170;
 
         const polarToCartesian = (angle, radius) => {
           const rad = (angle - 90) * Math.PI / 180;
@@ -201,7 +300,9 @@
               strokeWidth="3"
               opacity="0.6"
               onDragOver={handleDragOver}
-              onDrop={(e) => handleDrop(e, slice.id, 'crust')}
+              onDrop={(e) => handleDrop(e, slice, 'crust')}
+              onClick={(e) => handleZoneClick(e, slice, 'crust')}
+              onTouchEnd={(e) => { e.preventDefault(); handleZoneClick(e, slice, 'crust'); }}
               style={{ cursor: 'pointer' }}
             />
             <path
@@ -210,10 +311,12 @@
               stroke="#ffd700"
               strokeWidth="2"
               onDragOver={handleDragOver}
-              onDrop={(e) => handleDrop(e, slice.id, 'cheese')}
+              onDrop={(e) => handleDrop(e, slice, 'cheese')}
+              onClick={(e) => handleZoneClick(e, slice, 'cheese')}
+              onTouchEnd={(e) => { e.preventDefault(); handleZoneClick(e, slice, 'cheese'); }}
               style={{ cursor: 'pointer' }}
             />
-            
+
             <rect
               x={labelBg.x - 50}
               y={labelBg.y - 15}
@@ -236,14 +339,15 @@
             >
               {slice.label}
             </text>
-            
-            {slices[slice.id].crust.map((item, idx) => {
-              const itemAngle = startAngle + 15 + (idx * 12);
-              const itemPos = polarToCartesian(itemAngle, 225);
+
+            {slices[slice.id].crust.map((item) => {
+              // usa coordinate esplicite se presenti, altrimenti fallback a posizioni automatiche
+              const hasPos = typeof item.x === 'number' && typeof item.y === 'number';
+              let pos = hasPos ? { x: item.x, y: item.y } : polarToCartesian(startAngle + 15, 225);
               return (
                 <g key={item.uniqueId} onClick={() => removeItem(slice.id, 'crust', item.uniqueId)} style={{ cursor: 'pointer' }}>
-                  <circle cx={itemPos.x} cy={itemPos.y} r="12" fill="white" stroke={item.color} strokeWidth="2" />
-                  <foreignObject x={itemPos.x - 10} y={itemPos.y - 10} width="20" height="20">
+                  <circle cx={pos.x} cy={pos.y} r="12" fill="white" stroke={item.color} strokeWidth="2" />
+                  <foreignObject x={pos.x - 10} y={pos.y - 10} width="20" height="20">
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%', height: '100%' }}>
                       <Icon name={item.iconName} color={item.color} size={14} />
                     </div>
@@ -251,14 +355,14 @@
                 </g>
               );
             })}
-            
-            {slices[slice.id].cheese.map((item, idx) => {
-              const itemAngle = startAngle + 15 + (idx * 12);
-              const itemPos = polarToCartesian(itemAngle, 115);
+
+            {slices[slice.id].cheese.map((item) => {
+              const hasPos = typeof item.x === 'number' && typeof item.y === 'number';
+              let pos = hasPos ? { x: item.x, y: item.y } : polarToCartesian(startAngle + 15, 115);
               return (
                 <g key={item.uniqueId} onClick={() => removeItem(slice.id, 'cheese', item.uniqueId)} style={{ cursor: 'pointer' }}>
-                  <circle cx={itemPos.x} cy={itemPos.y} r="12" fill="white" stroke={item.color} strokeWidth="2" />
-                  <foreignObject x={itemPos.x - 10} y={itemPos.y - 10} width="20" height="20">
+                  <circle cx={pos.x} cy={pos.y} r="12" fill="white" stroke={item.color} strokeWidth="2" />
+                  <foreignObject x={pos.x - 10} y={pos.y - 10} width="20" height="20">
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%', height: '100%' }}>
                       <Icon name={item.iconName} color={item.color} size={14} />
                     </div>
@@ -271,17 +375,23 @@
       };
 
       return (
-        <div className="w-full min-h-screen bg-gradient-to-br from-orange-50 to-yellow-50 p-6 overflow-auto">
+        <div className="w-full min-h-screen bg-gradient-to-br from-orange-50 to-yellow-50 p-4 sm:p-6 overflow-auto">
           <div className="max-w-7xl mx-auto">
-            <h1 className="text-3xl font-bold text-center mb-2 text-orange-900">Pizza Touchpoint Map</h1>
-            <p className="text-center text-sm text-gray-600 mb-6">
-              Trascina i touchpoint negli spicchi: <span className="font-semibold text-amber-700">Bordo = Non Attivi</span> | <span className="font-semibold text-yellow-700">Mozzarella = Attivi</span>
+            <h1 className="text-2xl sm:text-3xl font-bold text-center mb-2 text-orange-900">Pizza Touchpoint Map</h1>
+            <p className="text-center text-sm text-gray-700 mb-4 sm:mb-6">
+              Trascina su desktop • <span className="font-semibold text-amber-700">TAP su mobile:</span> tocca un'icona per selezionarla (si evidenzia), poi tocca la fetta della pizza per posizionarla.
             </p>
-            
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+            {selectedItem && (
+              <div className="max-w-md mx-auto mb-4 p-3 rounded-xl bg-blue-50 border border-blue-200 text-sm text-blue-900 flex items-center gap-2 tap-hint">
+                <Icon name="lucide:hand" /> Tocca la zona (Bordo = Non attivi • Mozzarella = Attivi) per posizionare: <strong>{selectedItem.name}</strong>
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6">
               <div className="lg:col-span-2">
-                <div className="bg-white rounded-2xl shadow-xl p-8 flex items-center justify-center">
-                  <svg width="600" height="600" viewBox="0 0 600 600">
+                <div className="bg-white rounded-2xl shadow-xl p-2 sm:p-6 flex items-center justify-center">
+                  <svg ref={svgRef} width="100%" height="100%" viewBox="0 0 600 600" className="max-w-full h-[70vh] sm:h-[600px] touch-pan-y">
                     <circle cx="300" cy="300" r="290" fill="#d2691e" opacity="0.3" />
                     {funnelSlices.map((slice, index) => renderPizzaSlice(slice, index))}
                     <circle cx="300" cy="300" r="55" fill="#dc2626" />
@@ -304,15 +414,17 @@
                       <Icon name="lucide:plus" size={16} /> Aggiungi
                     </button>
                   </div>
-                  <div className="grid grid-cols-2 gap-2">
+                  <div className="grid grid-cols-2 sm:grid-cols-2 gap-2">
                     {touchpoints.filter(t => t.type === 'digital').map(tp => {
                       const isCustom = tp.id.startsWith('custom-');
+                      const isSelected = selectedItem && selectedItem.id === tp.id;
                       return (
                         <div key={tp.id} className="relative group">
                           <div
                             draggable
                             onDragStart={(e) => handleDragStart(e, tp)}
-                            className="flex items-center gap-2 p-2 bg-blue-50 rounded-lg cursor-move hover:bg-blue-100 transition-colors"
+                            onClick={() => setSelectedItem(prev => prev && prev.id === tp.id ? null : tp)}
+                            className={`flex items-center gap-2 p-2 rounded-lg cursor-pointer transition-colors ${isSelected ? 'selected-card' : 'bg-blue-50 hover:bg-blue-100'}`}
                           >
                             <Icon name={tp.iconName} color={tp.color} size={18} />
                             <span className="text-xs font-medium text-gray-700">{tp.name}</span>
@@ -335,15 +447,17 @@
                   <h3 className="font-bold text-lg mb-3 text-green-700 flex items-center gap-2">
                     <Icon name="lucide:store" size={20} /> Touchpoint Offline
                   </h3>
-                  <div className="grid grid-cols-2 gap-2">
+                  <div className="grid grid-cols-2 sm:grid-cols-2 gap-2">
                     {touchpoints.filter(t => t.type === 'offline').map(tp => {
                       const isCustom = tp.id.startsWith('custom-');
+                      const isSelected = selectedItem && selectedItem.id === tp.id;
                       return (
                         <div key={tp.id} className="relative group">
                           <div
                             draggable
                             onDragStart={(e) => handleDragStart(e, tp)}
-                            className="flex items-center gap-2 p-2 bg-green-50 rounded-lg cursor-move hover:bg-green-100 transition-colors"
+                            onClick={() => setSelectedItem(prev => prev && prev.id === tp.id ? null : tp)}
+                            className={`flex items-center gap-2 p-2 rounded-lg cursor-pointer transition-colors ${isSelected ? 'selected-card' : 'bg-green-50 hover:bg-green-100'}`}
                           >
                             <Icon name={tp.iconName} color={tp.color} size={18} />
                             <span className="text-xs font-medium text-gray-700">{tp.name}</span>
@@ -373,7 +487,7 @@
                       <div className="w-4 h-4 bg-yellow-100 rounded border-2 border-yellow-500"></div>
                       <span>Mozzarella = Touchpoint attivi</span>
                     </div>
-                    <p className="mt-2 italic">Clicca su un'icona nella pizza per rimuoverla</p>
+                    <p className="mt-2 italic">Clic/Tap su un'icona nella pizza per rimuoverla</p>
                   </div>
                 </div>
               </div>
@@ -383,7 +497,7 @@
               <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
                 <div className="bg-white rounded-2xl p-6 max-w-md w-full mx-4 shadow-2xl">
                   <h3 className="text-xl font-bold mb-4 text-gray-800">Aggiungi Touchpoint Personalizzato</h3>
-                  
+
                   <div className="space-y-4">
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">
